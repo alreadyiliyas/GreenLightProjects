@@ -1,7 +1,6 @@
 package main
 
 import (
-	"GoCourse/internal/validator"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"GoCourse/internal/validator"
+	
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -124,4 +125,20 @@ func (app *application) readInt(qs url.Values, key string, defaultValue int, v *
 	}
 
 	return i
+}
+
+func (app *application) background(fn func()) {
+	app.wg.Add(1)
+
+	go func() {
+		defer app.wg.Done()
+		
+		defer func() {
+			if err := recover(); err != nil {
+				app.logger.Error(fmt.Sprintf("%v", err))
+			}
+		}()
+
+		fn()
+	}()
 }
