@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"expvar"
 	"flag"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +95,20 @@ func main() {
 
 	logger.Info("database connection pool established")
 
+	expvar.NewString("version").Set(version)
+
+	expvar.Publish("goroutines", expvar.Func(func() any {
+		return runtime.NumGoroutine()
+	}))
+
+	expvar.Publish("database", expvar.Func(func() any {
+		return db.Stats()
+	}))
+
+	expvar.Publish("timestamp", expvar.Func(func() any {
+		return time.Now().Unix()
+	}))
+
 	app := &application{
 		config: cfg,
 		logger: logger,
@@ -112,11 +128,21 @@ func openDB(cfg config) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	// Устанавливает максимальное количество открытых соединений с базой данных.
+	// Это ограничение включает как активные соединения, так и те, что находятся в состоянии простоя (idle).
+	// Если количество одновременно запрашиваемых соединений превышает это значение, новые запросы будут ожидать освобождения соединений из пула.
+	// Полезно для предотвращения превышения лимитов соединений на стороне базы данных.
 	db.SetMaxOpenConns(cfg.db.maxOpenConns)
 
+	// Устанавливает максимальное количество соединений в состоянии простоя (idle) в пуле.
+	// Если количество неактивных соединений превышает это значение, лишние соединения будут закрыты.
+	// Это позволяет уменьшить использование ресурсов, поддерживая только нужное количество свободных соединений.
+	// Полезно для оптимизации, когда приложение имеет неравномерную нагрузку с периодами низкой активности.
 	db.SetMaxIdleConns(cfg.db.maxIdleConns)
 
+	// Устанавливает максимальное время, в течение которого соединение может находиться в состоянии простоя (idle) перед его закрытием.
+	// Если соединение не используется дольше указанного времени, оно удаляется из пула.
+	// Полезно для предотвращения накопления "мертвых" соединений, которые могут быть закрыты базой данных из-за неактивности.
 	db.SetConnMaxIdleTime(cfg.db.maxIdleTime)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
